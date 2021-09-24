@@ -1,0 +1,162 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+use File::Copy;
+use File::Spec::Functions 'catfile', 'rel2abs';
+use File::Temp 'tempdir';
+
+
+
+# Parse cmd line arguments
+unless ($#ARGV + 1 == 1) {
+	die "Please provide the path to a directory";
+}
+my $dir = rel2abs($ARGV[0]);
+my $msg = "Error processing \"${ARGV[0]}\":";
+my $content = catfile($dir, "content.tex");
+
+# Check if directory contains required files
+unless (-f "content.tex" and -f "graph.gv") {
+	die "$msg Directory must contain at least \"content.tex\" and \"graph.gv\""
+}
+
+
+
+# Check what was changed; for later use
+my $graph_changed;
+{
+	my $age = -M "graph.gv";
+	my $graph_svg = "graph.svg";
+	my $graph_map = "graph.map";
+	$graph_changed = !(
+		(-f $graph_svg and $age > -M $graph_svg) and
+		(-f $graph_map and $age > -M $graph_map)
+	);
+}
+my $content_changed;
+{
+	my $age = -M $content;
+	my $content_html = catfile($dir, "content.html");
+	my $content_css = catfile($dir, "content.css");
+	$content_changed = !(
+		(-f $content_html and $age > -M $content_html) and
+		(-f $content_css and $age > -M $content_css)
+	);
+}
+
+
+
+# Check if something must be done
+($content_changed or $graph_changed) or exit();
+
+
+
+# Compile graph
+if ($graph_changed) {
+	if (
+	system("dot -Tsvg graph.gv -o graph.svg") or
+	system("dot -Tcmapx graph.gv -o graph.map")
+	) {
+		die "$msg Could not compile \"graph.gv\".";
+	}
+}
+
+
+
+# Compile tex
+my $path = $dir; # Where to get the html from (tmp or target dir)
+if ($content_changed) {
+	# Move to a temporary directory
+	my $tmp = tempdir(CLEANUP => 1);
+	chdir($tmp);
+	# Run htlatex
+	if (system("make4ht $content -f html5+tidy \"mathml\"")) {
+		die "$msg Could not compile \"content.tex\":\n$?";
+	}
+	$path = $tmp;
+	# Reset working directory
+	chdir($dir);
+}
+
+
+
+# Read codes
+my $csscode;
+my $htmlcode;
+my $graphmap;
+{
+	# Read content.css
+	open(FH, "<", catfile($path, "content.css")) or die "$msg Could not open content css file";
+	read(FH, $csscode, -s FH);
+	close(FH);
+	# Read content.html
+	open(FH, "<", catfile($path, "content.html")) or die "$msg Could not open content html file";
+	read(FH, $htmlcode, -s FH);
+	close(FH);
+	# Read graph.map
+	open(FH, "<", catfile($dir, "graph.map")) or die "$msg Could not open graph map file";
+	read(FH, $graphmap, -s FH);
+	close(FH);
+	$graphmap =~ s/\s+$//; # Strip right
+}
+
+
+
+# Build full html
+# Content changed, adjust html and css
+if ($content_changed) {
+	# Insert modifications
+	{
+		# Pick third last line
+		my $i = length($csscode);
+		for (1..3) {
+			$i = rindex($csscode, "\n", $i-1);
+		}
+		substr($csscode, $i, 0) =
+			"\n.content {\n".
+			"	width: 60%;\n".
+			"	margin-right: auto;\n".
+			"	margin-left: auto;\n".
+			"	margin-bottom: 4cm\n".
+			"}\n".
+			".graph {\n".
+			"	display: block;\n".
+			"	margin-right: auto;\n".
+			"	margin-left: auto;\n".
+			"}";
+
+		# Write to file
+		open(FH, ">", catfile($dir, "content.css")) or die "$msg Could not write css file";
+		print FH $csscode;
+		close(FH)
+	}
+
+	# In html, add divider for content
+	my $keyword = "<body>";
+	my $i = index($htmlcode, $keyword) + length($keyword) + 1; # 1 for newline
+	substr($htmlcode, $i, 0) = "<div class=\"content\">\n";
+	$i = rindex($htmlcode, "</body>") - 1; # 1 for newline
+	substr($htmlcode, $i, 0) = "\n</div>";
+}
+
+# Content or graph changed, add graph to html
+if ($content_changed or $graph_changed) {
+		
+	my $j = rindex($htmlcode, "</body>") - 1; # 1 for newline;
+	my $i = $j;
+	unless ($content_changed) {
+		my $keyword = "</div>";
+		$i = rindex($htmlcode, $keyword, $j-1) + length($keyword);
+		# No +-1 because newline is removed here, since added below
+	}
+	substr($htmlcode, $i, $j-$i) =
+	"\n<IMG SRC=\"graph.svg\" USEMAP=\"\#G\" class=\"graph\">".
+	"\n$graphmap";
+
+	# Write to file
+	open(FH, ">", catfile($dir, "content.html")) or die "$msg Could not write html file";
+	print FH $htmlcode;
+	close(FH)
+}
+
