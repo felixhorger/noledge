@@ -27,19 +27,81 @@ Note that by default, a local, relative path is assumed, use file:// and https:/
 # Imports
 use warnings;
 use strict;
-use File::Find; use File::Copy;
-use File::Spec::Functions 'catfile', 'rel2abs';
+use File::Find;
+use File::Copy;
+use File::Path 'make_path';
 use File::Temp 'tempdir';
+use File::Basename;
+use File::Spec::Functions 'catfile', 'rel2abs', 'abs2rel';
+use Cwd 'realpath';
+use FindBin;
+use lib $FindBin::Bin;
+use MovePaths;
 
 
 
 # Parse cmd line arguments
-unless ($#ARGV + 1 == 1) {
-	die "Please provide the path to a directory";
+if (scalar(@ARGV) == 1) {
+	# Is directory?
+	-d $ARGV[0] or die "Single argument must be a directory";
+	# Walk directory and build entries
+	find(\&build_entry, ( rel2abs($ARGV[0]) ));
 }
-# Walk directory
-find(\&build_entry, ( rel2abs($ARGV[0]) ));
+elsif (scalar(@ARGV) == 4 and $ARGV[0] eq "move") {
+	(-d $ARGV[1] and ! -e $ARGV[2]) or die "Source must be directory and target must be non-existent";
+	# Adjust paths in entry
+	move_entry(rel2abs($ARGV[1]), rel2abs($ARGV[2]), rel2abs($ARGV[3]));
+	# Adjust paths in all other entries
+}
+elsif (scalar(@ARGV) >= 3 and $ARGV[0] eq "find") {
+	
+}
+else {
+	die "Please provide appropriate command line arguments";
+}
 
+
+
+# Subroutines
+
+sub move_entry {
+	# Get arguments
+	my ($source, $target, $root) = @_;
+	$source = realpath($source);
+	$target = realpath($target);
+	$root = realpath($root);
+
+	find(MovePaths::subroutine_for_find("entry\\.html", $source, $target, \&separators), ($root));
+	make_path(dirname($target));
+	move($source, $target);
+}
+
+sub separators {
+	my $ext;
+	{
+		my ($name) = @_;
+		$name =~ /\.([^.]+)$/;
+		$ext = $1;
+	}
+
+	my $start;
+	my $end;
+	if ($ext eq "tex") {
+		$start = "\{";
+		$end = "\}";
+	}
+	elsif ($ext =~ /(gv|map|html)/) {
+		$start = "\"";
+		$end = "\"";
+	}
+	elsif ($ext =~ /(svg|css)/) {
+		system("touch ${File::Find::name}");
+	}
+	else {
+		return;
+	}
+	return ($start, $end);
+}
 
 
 =item build_entry()
@@ -48,14 +110,10 @@ Should be used with File::Find::find.
 =cut
 sub build_entry {
 
-	# Check if directory and cd into it
 	my $dir = $File::Find::dir;
 	my $wd = $File::Find::name;
 	(-d $wd) or return;
 	chdir($wd);
-
-	# Defines
-	my $msg = "Error processing \"$wd\":";
 
 	# Check if directory contains required files
 	unless (-f "content.tex" and -f "graph.gv") {
@@ -63,21 +121,24 @@ sub build_entry {
 		return;
 	}
 
+	# Defines
+	my $msg = "Error processing \"$wd\":";
+
 	# Check what was changed; for later use
 	my $graph_changed;
 	{
 		my $age = -M "graph.gv";
 		$graph_changed = !(
-			(-f "graph.svg" and $age > -M "graph.svg") and
-			(-f "graph.map" and $age > -M "graph.map")
+			(-f "graph.svg" and $age >= -M "graph.svg") and
+			(-f "graph.map" and $age >= -M "graph.map")
 		);
 	}
 	my $content_changed;
 	{
 		my $age = -M "content.tex";
 		$content_changed = !(
-			(-f "entry.html" and $age > -M "entry.html") and
-			(-f "entry.css" and $age > -M "entry.css")
+			(-f "entry.html" and $age >= -M "entry.html") and
+			(-f "entry.css" and $age >= -M "entry.css")
 		);
 	}
 
@@ -165,6 +226,7 @@ sub build_entry {
 				"	display: block;\n".
 				"	margin-right: auto;\n".
 				"	margin-left: auto;\n".
+				"	margin-bottom: 4cm\n".
 				"}";
 
 			# Write to file
