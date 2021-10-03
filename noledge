@@ -4,22 +4,6 @@
 
 =head1 No ledge
 Structured knowledge database in a wiki-like HTML format.
-
-=over
-=item -
-Requires a single directory as cmd-line argument.
-This directory is transversed recursively and whenever a pair of files
-"content.tex" (LaTex) and "graph.gv" (GraphViz) is found, an HTML (+CSS) page is generated.
-
-=item -
-Both the tex and the graph can be any valid document supported by LaTex and GraphViz.
-
-=item -
-The user can insert hyperlinks in the tex file (LaTex package hyperref) and the graph (URL attribute)
-that point to other entries.
-Note that by default, a local, relative path is assumed, use file:// and https:// for more control.
-
-=back
 =cut
 
 
@@ -27,102 +11,161 @@ Note that by default, a local, relative path is assumed, use file:// and https:/
 # Imports
 use warnings;
 use strict;
+use Getopt::ArgParse;
 use File::Find;
 use File::Copy;
 use File::Path 'make_path';
 use File::Temp 'tempdir';
 use File::Basename;
 use File::Spec::Functions 'catfile', 'rel2abs', 'abs2rel';
-use Cwd 'realpath';
+use Cwd 'realpath', 'getcwd';
 use FindBin;
 use lib $FindBin::Bin;
+use Parallel::ForkManager;
 use MovePaths;
 
 
 
+# Globals
+my $processpool;
+
+
+my $parser = Getopt::ArgParse->new_parser(
+	prog => "noledge",
+	description => "Structure knowledge using LaTex, Graphviz and HTML.",
+);
+my $subparsers = $parser->add_subparsers(title => "command");
+# Build
+my $build_parser = $subparsers->add_parser(
+	"build",
+	help => "HTML entries",
+	description => "Build all entries found in a given root directory.\n" .
+	"Entry is defined as a directory containing at least a content.tex and a graph.gv file.\n"
+);
+$build_parser->add_arg(
+	"root",
+	help => "All entries found in this directory will be build."
+);
+$build_parser->add_arg(
+	"--jobs",
+	"-j",
+	default => 1,
+	help => "How many processes to use for building."
+);
+# Move
+my $move_parser = $subparsers->add_parser(
+	"move",
+	help => "entry with automatic path adjustment.",
+	description => "Move a single entry to another location.\n" .
+	"Paths in all relevant files (tex, gv, html, map) are automatically adjusted\n" .
+	"in all entries found in a given root directory."
+);
+$move_parser->add_arg(
+	"source",
+	help => "Directory containing at least a content.tex and graph.gv file."
+);
+$move_parser->add_arg(
+	"target",
+	help => "New name of the entry's directory."
+);
+$move_parser->add_arg(
+	"root",
+	help => "Paths identified in *.tex, *.gv, .*map, and *.html files found in\n" .
+	"this directory will be adjusted accordingly."
+);
+
+# Find
+my $find_parser = $subparsers->add_parser(
+	"find",
+	help => "Not implemented: entries that match all keywords."
+);
+my $cmdlineargs = $parser->parse_args();
+
 # Parse cmd line arguments
-if (scalar(@ARGV) == 1) {
+if ($cmdlineargs->current_command() eq "build") {
 	# Is directory?
-	-d $ARGV[0] or die "Single argument must be a directory";
+	-d $cmdlineargs->root or die "Argument must be a directory";
 	# Walk directory and build entries
-	find(\&build_entry, ( rel2abs($ARGV[0]) ));
+	if ($cmdlineargs->jobs > 1) {
+		$processpool = Parallel::ForkManager->new($cmdlineargs->jobs);
+		$processpool->run_on_finish(\&forked_build_was_successful);
+		find(\&run_build_entry_parallel, ( rel2abs($cmdlineargs->root) ));
+		$processpool->wait_all_children();
+	}
+	elsif ($cmdlineargs->jobs == 1) {
+		find(\&run_build_entry, ( rel2abs($cmdlineargs->root) ));
+	}
+	else {
+		die "Number of jobs must be positive"
+	}
 }
-elsif (scalar(@ARGV) == 4 and $ARGV[0] eq "move") {
-	(-d $ARGV[1] and ! -e $ARGV[2]) or die "Source must be directory and target must be non-existent";
+elsif ($cmdlineargs->current_command() eq "move") {
+	unless (-d $cmdlineargs->source and ! -e $cmdlineargs->target and -d $cmdlineargs->root) {
+		die "Source must be directory and target must be non-existent";
+	}
 	# Adjust paths in entry
-	move_entry(rel2abs($ARGV[1]), rel2abs($ARGV[2]), rel2abs($ARGV[3]));
+	move_entry(rel2abs($cmdlineargs->source), rel2abs($cmdlineargs->target), rel2abs($cmdlineargs->root));
 	# Adjust paths in all other entries
 }
-elsif (scalar(@ARGV) >= 3 and $ARGV[0] eq "find") {
-	
-}
-else {
-	die "Please provide appropriate command line arguments";
+elsif ($cmdlineargs->current_command() eq "find") {
+	die "Not implemented";
 }
 
 
 
 # Subroutines
+sub is_entry {
 
-sub move_entry {
-	# Get arguments
-	my ($source, $target, $root) = @_;
-	$source = realpath($source);
-	$target = realpath($target);
-	$root = realpath($root);
+	my $entry = shift;
 
-	find(MovePaths::subroutine_for_find("entry\\.html", $source, $target, \&separators), ($root));
-	make_path(dirname($target));
-	move($source, $target);
+	# Is valid directory?
+	return 0 unless (-d $entry and substr($entry, 0, 1) ne ".");
+
+	# Check if directory contains required files
+	return 0 unless (-f catfile($entry, "content.tex") and -f catfile($entry, "graph.gv"));
+
+	return 1;
 }
+sub forked_build_was_successful {
+	my ($pid, $exit_code, $entry) = @_;
+	$exit_code and die "Build of $entry was not successful, exit code $exit_code";
+}
+sub run_build_entry {
 
-sub separators {
-	my $ext;
-	{
-		my ($name) = @_;
-		$name =~ /\.([^.]+)$/;
-		$ext = $1;
-	}
+	my $entry = $File::Find::name;
+	return unless is_entry($entry);
+	build_entry($entry);
+}
+sub run_build_entry_parallel {
 
-	my $start;
-	my $end;
-	if ($ext eq "tex") {
-		$start = "\{";
-		$end = "\}";
-	}
-	elsif ($ext =~ /(gv|map|html)/) {
-		$start = "\"";
-		$end = "\"";
-	}
-	elsif ($ext =~ /(svg|css)/) {
-		system("touch ${File::Find::name}");
-	}
-	else {
-		return;
-	}
-	return ($start, $end);
+	my $entry = $File::Find::name;
+	return unless is_entry($entry);
+
+	# Build entry in forked process
+	$processpool->start($entry) and return;
+	build_entry($entry);
+	$processpool->finish();
 }
 
 
-=item build_entry()
+
+=item build_entry
 Routine to generate an HTML (+CSS) entry from a tex and gv file.
-Should be used with File::Find::find.
+Argument: directory containing the above files.
 =cut
 sub build_entry {
 
-	my $dir = $File::Find::dir;
-	my $wd = $File::Find::name;
-	(-d $wd) or return;
-	chdir($wd);
+	my $directory = shift;
 
-	# Check if directory contains required files
-	unless (-f "content.tex" and -f "graph.gv") {
-		chdir($dir);
-		return;
-	}
+	-d $directory or die "Argument must be a directory";
+	my $wd = getcwd();
+	chdir($directory);
+
+	(-f "content.tex" and -f "graph.gv") or
+	die "content.tex or graph.gv missing";
 
 	# Defines
-	my $msg = "Error processing \"$wd\":";
+	my $msg = "Error processing \"$directory\":";
 
 	# Check what was changed; for later use
 	my $graph_changed;
@@ -143,7 +186,7 @@ sub build_entry {
 	}
 
 	# Check if something must be done
-	($content_changed or $graph_changed) or (chdir($dir) and return);
+	(chdir($wd) and return) unless ($content_changed or $graph_changed);
 
 
 
@@ -175,7 +218,7 @@ sub build_entry {
 		my $tmp = tempdir(CLEANUP => 1);
 		chdir($tmp);
 		# Run htlatex
-		my $contentpath = catfile($wd, 'content.tex');
+		my $contentpath = catfile($directory, 'content.tex');
 		if (system("make4ht $contentpath -f html5+tidy \"mathml\"")) {
 			die "$msg Could not compile \"content.tex\"";
 		}
@@ -190,7 +233,7 @@ sub build_entry {
 		close(FH);
 		$htmlcode =~ s/content\.css/entry.css/;
 		# Reset working directory
-		chdir($wd);
+		chdir($directory);
 	}
 	else {
 		# Read entry.css
@@ -206,8 +249,11 @@ sub build_entry {
 
 
 	# Build full html
+	my $html_div_content = "<div class=\"content\">";
+	my $html_graph =
+	"<IMG SRC=\"graph.svg\" USEMAP=\"\#G\" class=\"graph\">\n$graphmap";
+	if ($content_changed) { 
 	# Content changed, adjust html and css
-	if ($content_changed) {
 		# Insert modifications
 		{
 			# Pick third last line
@@ -220,13 +266,14 @@ sub build_entry {
 				"	width: 60%;\n".
 				"	margin-right: auto;\n".
 				"	margin-left: auto;\n".
-				"	margin-bottom: 4cm\n".
+				"	margin-bottom: 4cm;\n".
 				"}\n".
 				".graph {\n".
 				"	display: block;\n".
 				"	margin-right: auto;\n".
 				"	margin-left: auto;\n".
-				"	margin-bottom: 4cm\n".
+				"	margin-top: 2cm;\n".
+				"	margin-bottom: 2.5cm;\n".
 				"}";
 
 			# Write to file
@@ -235,39 +282,72 @@ sub build_entry {
 			close(FH)
 		}
 
-		# In html, add divider for content
+		# In html, add graph and divider for content
 		my $keyword = "<body>";
 		my $i = index($htmlcode, $keyword) + length($keyword) + 1; # 1 for newline
-		substr($htmlcode, $i, 0) = "<div class=\"content\">\n";
+		substr($htmlcode, $i, 0) = "$html_graph$html_div_content\n";
 		$i = rindex($htmlcode, "</body>") - 1; # 1 for newline
 		substr($htmlcode, $i, 0) = "\n</div>";
 	}
-
-
-
-	# Content or graph changed, add graph to html
-	if ($content_changed or $graph_changed) {
-		my $j = rindex($htmlcode, "</body>") - 1; # 1 for newline;
-		my $i = $j;
-		# If content did not change, search for another delimiter
-		unless ($content_changed) {
-			my $keyword = "</div>";
-			$i = rindex($htmlcode, $keyword, $j-1) + length($keyword);
-			# No +-1 because newline is removed here, since added below
-		}
-		# Insert (content changed) or replace
-		# (content did not change and map from previous compilation is present)
-		substr($htmlcode, $i, $j-$i) =
-		"\n<IMG SRC=\"graph.svg\" USEMAP=\"\#G\" class=\"graph\">".
-		"\n$graphmap";
-
-		# Write to file
+	elsif ($graph_changed) { # Content did not change, but graph did
+		my $keyword = "<body>";
+		my $i = index($htmlcode, $keyword) + length($keyword) + 1; # 1 for newline;
+		my $j = index($htmlcode, $html_div_content, $i);
+		# Replace graph
+		substr($htmlcode, $i, $j - $i) = $html_graph;
+	}
+	# Write to file
+	{
 		open(FH, ">", "entry.html") or die "$msg Could not write html file";
 		print FH $htmlcode;
-		close(FH)
+		close(FH);
 	}
 
-	# Reset working dir
-	chdir($dir);
+	# Reset working directory
+	chdir($wd);
 }
 
+
+
+=item move_entry
+=cut
+sub move_entry {
+	# Get arguments
+	my ($source, $target, $root) = @_;
+	$source = realpath($source);
+	$target = realpath($target);
+	$root = realpath($root);
+
+	find(MovePaths::subroutine_for_find("entry\\.html", $source, $target, \&separators), ($root));
+	make_path(dirname($target));
+	move($source, $target);
+}
+
+=item separators
+=cut
+sub separators {
+	my $ext;
+	{
+		my ($name) = @_;
+		$name =~ /\.([^.]+)$/;
+		$ext = $1;
+	}
+
+	my $start;
+	my $end;
+	if ($ext eq "tex") {
+		$start = "\{";
+		$end = "\}";
+	}
+	elsif ($ext =~ /(gv|map|html)/) {
+		$start = "\"";
+		$end = "\"";
+	}
+	elsif ($ext =~ /(svg|css)/) {
+		system("touch ${File::Find::name}");
+	}
+	else {
+		return;
+	}
+	return ($start, $end);
+}
