@@ -159,7 +159,7 @@ sub build_entry {
 
 	-d $directory or die "Argument must be a directory";
 	my $wd = getcwd();
-	chdir($directory);
+	chdir($directory) or die "Could not cd to $directory";
 
 	(-f "content.tex" and -f "graph.gv") or
 	die "content.tex or graph.gv missing";
@@ -186,7 +186,10 @@ sub build_entry {
 	}
 
 	# Check if something must be done
-	(chdir($wd) and return) unless ($content_changed or $graph_changed);
+	unless ($content_changed or $graph_changed) {;
+		chdir($wd) or die "Could not cd to $wd";
+		return;
+	}
 
 
 
@@ -215,11 +218,12 @@ sub build_entry {
 	my $htmlcode;
 	if ($content_changed) {
 		# Move to a temporary directory
-		my $tmp = tempdir(CLEANUP => 1);
-		chdir($tmp);
+		my $tmp = tempdir(CLEANUP => 0);
+		chdir($tmp) or die "Could not cd to $tmp";
 		# Run htlatex
 		my $contentpath = catfile($directory, 'content.tex');
-		if (system("make4ht $contentpath -f html5+tidy \"mathml\"")) {
+		# Mathjax: if (system("export TEXINPUTS=.:$directory:\$TEXINPUTS; make4ht -l -f html5+tidy -c ~/projects/noledge/my.cfg $contentpath \"html,mathjax\"")) {
+		if (system("export TEXINPUTS=.:$directory:\$TEXINPUTS; make4ht -l -f html5+tidy -c ~/projects/noledge/my.cfg $contentpath \"html,pic-m,svg\"")) {
 			die "$msg Could not compile \"content.tex\"";
 		}
 		# Note that output files are named like the input tex file, i.e. "content"
@@ -231,9 +235,16 @@ sub build_entry {
 		open(FH, "<", "content.html") or die "$msg Could not open content html file";
 		read(FH, $htmlcode, -s FH);
 		close(FH);
+		# Adjust css name
 		$htmlcode =~ s/content\.css/entry.css/;
+		# Remove garbage from html img src
+		$htmlcode =~ s/(<img src=".*?):.*?"/$1"/g;
+		# Move any generated svg images
+		foreach (glob "content*.svg") {
+			move($_, $directory) or die "Could not move svg $_";
+		}
 		# Reset working directory
-		chdir($directory);
+		chdir($directory) or die "Could not cd to $directory";
 	}
 	else {
 		# Read entry.css
@@ -263,7 +274,7 @@ sub build_entry {
 			}
 			substr($csscode, $i, 0) =
 				"\n.content {\n".
-				"	width: 60%;\n".
+				"	width: 25cm;\n".
 				"	margin-right: auto;\n".
 				"	margin-left: auto;\n".
 				"	margin-bottom: 4cm;\n".
@@ -274,7 +285,13 @@ sub build_entry {
 				"	margin-left: auto;\n".
 				"	margin-top: 2cm;\n".
 				"	margin-bottom: 2.5cm;\n".
-				"}";
+				"}\n".
+				".figure {\n".
+				"	display: block;\n".
+				"	margin-right: auto;\n".
+				"	margin-left: auto;\n".
+				"}\n".
+				"img { image-rendering: -moz-crisp-edges; }";
 
 			# Write to file
 			open(FH, ">", "entry.css") or die "$msg Could not write css file";
@@ -283,8 +300,10 @@ sub build_entry {
 		}
 
 		# In html, add graph and divider for content
-		my $keyword = "<body>";
-		my $i = index($htmlcode, $keyword) + length($keyword) + 1; # 1 for newline
+		my $keyword = '<body>';
+		my $i = index($htmlcode, $keyword);
+		$i > 0 or die "Could not find <body> in html";
+		$i += length($keyword) + 1;
 		substr($htmlcode, $i, 0) = "$html_graph$html_div_content\n";
 		$i = rindex($htmlcode, "</body>") - 1; # 1 for newline
 		substr($htmlcode, $i, 0) = "\n</div>";
@@ -304,7 +323,7 @@ sub build_entry {
 	}
 
 	# Reset working directory
-	chdir($wd);
+	chdir($wd) or die "Could not cd to $wd";
 }
 
 
@@ -320,7 +339,7 @@ sub move_entry {
 
 	find(MovePaths::subroutine_for_find("entry\\.html", $source, $target, \&separators), ($root));
 	make_path(dirname($target));
-	move($source, $target);
+	move($source, $target) or die "Could not move entry $source";
 }
 
 =item separators

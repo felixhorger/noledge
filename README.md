@@ -31,3 +31,27 @@ Expected Functionality
 - Nodes' contents are generated with LaTex.
 - Visualisation and interactive traversal.
 
+
+Manual
+------
+
+
+Entry is a directory with at least the files content.tex and graph.gv.
+Can have subdirectories containing more entries.
+Note that the graph's name must be G (symptom: hyperlinks in graphs not present).
+
+=item -
+Requires a single directory as cmd-line argument.
+This directory is transversed recursively and whenever a pair of files
+"content.tex" (LaTex) and "graph.gv" (GraphViz) is found, an HTML (+CSS) page is generated.
+
+=item -
+These files can contain any valid LaTex- respectively Graphviz-code.
+
+=item -
+The user can insert hyperlinks in the tex file (LaTex package hyperref) and the graph (URL attribute)
+that point to other entries.
+Note that by default, a local, relative path is assumed (use file:// and https:// for fine-grained control).
+
+Use absolute paths for everything outside the repository, otherwise relative.
+Links to files which are in non-child folders will be lost upon move.
