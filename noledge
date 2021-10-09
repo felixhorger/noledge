@@ -52,6 +52,12 @@ $build_parser->add_arg(
 	default => 1,
 	help => "How many processes to use for building."
 );
+$build_parser->add_arg(
+	"--quick",
+	type => "Bool",
+	default => 0,
+	help => "If set, latex will be run once only, e.g. references might be wrong."
+);
 # Move
 my $move_parser = $subparsers->add_parser(
 	"move",
@@ -103,9 +109,7 @@ elsif ($cmdlineargs->current_command() eq "move") {
 	unless (-d $cmdlineargs->source and ! -e $cmdlineargs->target and -d $cmdlineargs->root) {
 		die "Source must be directory and target must be non-existent";
 	}
-	# Adjust paths in entry
 	move_entry(rel2abs($cmdlineargs->source), rel2abs($cmdlineargs->target), rel2abs($cmdlineargs->root));
-	# Adjust paths in all other entries
 }
 elsif ($cmdlineargs->current_command() eq "find") {
 	die "Not implemented";
@@ -167,162 +171,118 @@ sub build_entry {
 	# Defines
 	my $msg = "Error processing \"$directory\":";
 
+	# Create build dir
+	if (! -d "build") { mkdir("build"); }
+	# Create css file if non-existant
+	# Note that the user can define a custom one, it won't be overwritten
+	if (! -e "entry.css") {
+		open(FH, ">", "entry.css") or die "$msg Could not open entry.css for writing";
+		print(FH
+			".graph {\n" .
+			"	display: block;\n" .
+			"	margin-right: auto;\n" .
+			"	margin-left: auto;\n" .
+			"	margin-top: 2cm;\n" .
+			"	margin-bottom: 2.5cm;\n" .
+			"}\n" .
+			".content {\n" .
+			"	display: block;\n" .
+			"	margin-right: auto;\n" .
+			"	margin-left: auto;\n" .
+			"	margin-top: 0cm;\n" .
+			"	margin-bottom: 2cm;\n" .
+			"}\n"
+		);
+		close(FH);
+	}
+
 	# Check what was changed; for later use
 	my $graph_changed;
 	{
 		my $age = -M "graph.gv";
 		$graph_changed = !(
-			(-f "graph.svg" and $age >= -M "graph.svg") and
-			(-f "graph.map" and $age >= -M "graph.map")
+			(-f "build/graph.svg" and $age >= -M "build/graph.svg") and
+			(-f "build/graph.map" and $age >= -M "build/graph.map")
 		);
 	}
 	my $content_changed;
 	{
 		my $age = -M "content.tex";
-		$content_changed = !(
-			(-f "entry.html" and $age >= -M "entry.html") and
-			(-f "entry.css" and $age >= -M "entry.css")
-		);
+		$content_changed = !(-f "build/content.svg" and $age >= -M "build/content.svg");
 	}
 
 	# Check if something must be done
-	unless ($content_changed or $graph_changed) {;
+	unless ((! -e "entry.html") or $content_changed or $graph_changed) {
 		chdir($wd) or die "Could not cd to $wd";
 		return;
 	}
 
-
-
 	# Compile graph
 	if ($graph_changed) {
 		if (
-		system("dot -Tsvg graph.gv -o graph.svg") or
-		system("dot -Tcmapx graph.gv -o graph.map")
+		system("dot -Tsvg graph.gv -o build/graph.svg") or
+		system("dot -Tcmapx graph.gv -o build/graph.map")
 		) {
 			die "$msg Could not compile \"graph.gv\".";
 		}
 	}
 	# Read code of graph map for later integration into the html
-	my $graphmap;
+	my $htmlgraph;
 	{
-		open(FH, "<", "graph.map") or die "$msg Could not open graph map file";
+		my $graphmap;
+		open(FH, "<", "build/graph.map") or die "$msg Could not open graph map file";
 		read(FH, $graphmap, -s FH);
 		close(FH);
 		$graphmap =~ s/\s+$//; # Strip right
+		$htmlgraph =
+			"<IMG SRC=\"build/graph.svg\" USEMAP=\"\#G\" class=\"graph\">\n$graphmap";
 	}
-
-
 
 	# Compile tex
-	my $csscode;
 	my $htmlcode;
 	if ($content_changed) {
-		# Move to a temporary directory
-		my $tmp = tempdir(CLEANUP => 0);
-		chdir($tmp) or die "Could not cd to $tmp";
-		# Run htlatex
-		my $contentpath = catfile($directory, 'content.tex');
-		# Mathjax: if (system("export TEXINPUTS=.:$directory:\$TEXINPUTS; make4ht -l -f html5+tidy -c ~/projects/noledge/my.cfg $contentpath \"html,mathjax\"")) {
-		if (system("export TEXINPUTS=.:$directory:\$TEXINPUTS; make4ht -l -f html5+tidy -c ~/projects/noledge/my.cfg $contentpath \"html,pic-m,svg\"")) {
-			die "$msg Could not compile \"content.tex\"";
-		}
-		# Note that output files are named like the input tex file, i.e. "content"
-		# Read content.css
-		open(FH, "<", "content.css") or die "$msg Could not open content css file";
-		read(FH, $csscode, -s FH);
-		close(FH);
-		# Read content.html
-		open(FH, "<", "content.html") or die "$msg Could not open content html file";
-		read(FH, $htmlcode, -s FH);
-		close(FH);
-		# Adjust css name
-		$htmlcode =~ s/content\.css/entry.css/;
-		# Remove garbage from html img src
-		$htmlcode =~ s/(<img src=".*?):.*?"/$1"/g;
-		# Move any generated svg images
-		foreach (glob "content*.svg") {
-			move($_, $directory) or die "Could not move svg $_";
-		}
-		# Reset working directory
-		chdir($directory) or die "Could not cd to $directory";
+		# How often to run latex?
+		my $runs = 2;
+		if ($cmdlineargs->quick) { $runs = 1; }
+		# Run latex
+		if (system(
+			#--no-shell-escape 
+			('latex --output-format=dvi --output-dir=build content.tex && ' x $runs) . # TODO: Sure that is required?
+			'dvisvgm --page=2 --linkmark=none -n build/content.dvi --output=build/%f.svg'
+		)) { die "$msg Could not compile \"content.tex\""; }
 	}
-	else {
-		# Read entry.css
-		open(FH, "<", "entry.css") or die "$msg Could not open content css file";
-		read(FH, $csscode, -s FH);
-		close(FH);
-		# Read entry.html
-		open(FH, "<", "entry.html") or die "$msg Could not open content html file";
-		read(FH, $htmlcode, -s FH);
-		close(FH);
-	}
-
-
-
-	# Build full html
-	my $html_div_content = "<div class=\"content\">";
-	my $html_graph =
-	"<IMG SRC=\"graph.svg\" USEMAP=\"\#G\" class=\"graph\">\n$graphmap";
-	if ($content_changed) { 
-	# Content changed, adjust html and css
-		# Insert modifications
-		{
-			# Pick third last line
-			my $i = length($csscode);
-			for (1..3) {
-				$i = rindex($csscode, "\n", $i-1);
-			}
-			substr($csscode, $i, 0) =
-				"\n.content {\n".
-				"	width: 25cm;\n".
-				"	margin-right: auto;\n".
-				"	margin-left: auto;\n".
-				"	margin-bottom: 4cm;\n".
-				"}\n".
-				".graph {\n".
-				"	display: block;\n".
-				"	margin-right: auto;\n".
-				"	margin-left: auto;\n".
-				"	margin-top: 2cm;\n".
-				"	margin-bottom: 2.5cm;\n".
-				"}\n".
-				".figure {\n".
-				"	display: block;\n".
-				"	margin-right: auto;\n".
-				"	margin-left: auto;\n".
-				"}\n".
-				"img { image-rendering: -moz-crisp-edges; }";
-
-			# Write to file
-			open(FH, ">", "entry.css") or die "$msg Could not write css file";
-			print FH $csscode;
-			close(FH)
-		}
-
-		# In html, add graph and divider for content
-		my $keyword = '<body>';
-		my $i = index($htmlcode, $keyword);
-		$i > 0 or die "Could not find <body> in html";
-		$i += length($keyword) + 1;
-		substr($htmlcode, $i, 0) = "$html_graph$html_div_content\n";
-		$i = rindex($htmlcode, "</body>") - 1; # 1 for newline
-		substr($htmlcode, $i, 0) = "\n</div>";
-	}
-	elsif ($graph_changed) { # Content did not change, but graph did
-		my $keyword = "<body>";
-		my $i = index($htmlcode, $keyword) + length($keyword) + 1; # 1 for newline;
-		my $j = index($htmlcode, $html_div_content, $i);
-		# Replace graph
-		substr($htmlcode, $i, $j - $i) = $html_graph;
-	}
-	# Write to file
+	# Read compiled content for later integration into html
+	my $htmlcontent;
 	{
-		open(FH, ">", "entry.html") or die "$msg Could not write html file";
-		print FH $htmlcode;
+		open(FH, "<", 'build/content.svg') or die "$msg Could not open content html file $_";
+		read(FH, $htmlcontent, -s FH);
 		close(FH);
+		# Insert class to center content
+		my $keyword = "<svg ";
+		my $i = index($htmlcontent, $keyword);
+		substr($htmlcontent, $i + length($keyword), 0) = 'class="content" ';
 	}
-
-	# Reset working directory
+	
+	# Write html to file (here it is known that graph or content changed
+	open(FH, ">", "entry.html") or die "$msg Could not write html file";
+	print(FH
+		"<!DOCTYPE html>\n" .
+		"<html lang=\"en-US\">\n" .
+		"<head>\n" .
+		"<title>TODO</title>\n" .
+		"<meta charset=\"utf-8\" />\n" .
+		"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />\n" .
+		"<link rel=\"stylesheet\" type=\"text/css\" href=\"entry.css\" />\n" .
+		"</head>\n" .
+		"<body>\n" .
+		$htmlgraph .
+		"\n".
+		$htmlcontent .
+		"\n</body>\n".
+		"</html>\n"
+	);
+	close(FH);
+	# Go back to working directory
 	chdir($wd) or die "Could not cd to $wd";
 }
 
