@@ -19,8 +19,7 @@ use File::Temp 'tempdir';
 use File::Basename;
 use File::Spec::Functions 'catfile', 'rel2abs', 'abs2rel';
 use Cwd 'realpath', 'getcwd';
-use FindBin;
-use lib $FindBin::Bin;
+use lib dirname(realpath($0));
 use Parallel::ForkManager;
 use MovePaths;
 
@@ -30,11 +29,14 @@ use MovePaths;
 my $processpool;
 
 
+
+# Command line args
 my $parser = Getopt::ArgParse->new_parser(
 	prog => "noledge",
-	description => "Structure knowledge using LaTex, Graphviz and HTML.",
+	description => "Structure knowledge using LaTex, GraphViz and HTML.",
 );
 my $subparsers = $parser->add_subparsers(title => "command");
+
 # Build
 my $build_parser = $subparsers->add_parser(
 	"build",
@@ -58,6 +60,7 @@ $build_parser->add_arg(
 	default => 0,
 	help => "If set, latex will be run once only, e.g. references might be wrong."
 );
+
 # Move
 my $move_parser = $subparsers->add_parser(
 	"move",
@@ -85,9 +88,26 @@ my $find_parser = $subparsers->add_parser(
 	"find",
 	help => "Not implemented: entries that match all keywords."
 );
-my $cmdlineargs = $parser->parse_args();
+
+# Initialize entry
+my $init_parser = $subparsers->add_parser(
+	"init",
+	help => "Set up an empty entry."
+);
+$init_parser->add_arg(
+	"directory",
+	metavar => "DIR",
+	help => "Where to set up the new entry."
+);
+
+
 
 # Parse cmd line arguments
+my $cmdlineargs = $parser->parse_args();
+unless (defined($cmdlineargs->current_command())) {
+	$parser->print_usage();
+	die;
+}
 if ($cmdlineargs->current_command() eq "build") {
 	# Is directory?
 	-d $cmdlineargs->root or die "Argument must be a directory";
@@ -114,6 +134,10 @@ elsif ($cmdlineargs->current_command() eq "move") {
 elsif ($cmdlineargs->current_command() eq "find") {
 	die "Not implemented";
 }
+elsif ($cmdlineargs->current_command() eq "init") {
+	initialize_entry($cmdlineargs->directory);
+}
+
 
 
 
@@ -330,3 +354,36 @@ sub separators {
 	}
 	return ($start, $end);
 }
+
+
+
+sub initialize_entry {
+
+	my $dir = shift;
+
+	die "$dir already exists" if (-e $dir);
+	die "Parent directory of $dir must exist" if (! -e dirname($dir));
+
+	mkdir($dir);
+
+	open(FH, ">", "$dir/content.tex");
+	print(FH
+		"\\documentclass{article}\n" .
+		"\\usepackage[hypertex]{hyperref}\n\n" .
+		"\\title{}\n" .
+		"\\author{}\n" .
+		"\\date{}\n\n" .
+		"\\begin{document}\n" .
+		"\\pagenumbering{gobble}\n" .
+		"\\vbox{\n" .
+		"	\\maketitle\n\n" .
+		"}\n" .
+		"\\end{document}\n"
+	);
+	close(FH);
+
+	open(FH, ">", "$dir/graph.gv");
+	print(FH "digraph G {\n\n}\n");
+	close(FH);
+}
+
