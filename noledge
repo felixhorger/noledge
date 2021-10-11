@@ -278,7 +278,7 @@ sub build_entry {
 	# Read compiled content for later integration into html
 	my $htmlcontent;
 	{
-		open(FH, "<", 'build/content.svg') or die "$msg Could not open content html file $_";
+		open(FH, "<", 'build/content.svg') or die "$msg Could not open content.svg $_";
 		read(FH, $htmlcontent, -s FH);
 		close(FH);
 		# Insert class to center content
@@ -369,16 +369,19 @@ sub initialize_entry {
 	open(FH, ">", "$dir/content.tex");
 	print(FH
 		"\\documentclass{article}\n" .
-		"\\usepackage[hypertex]{hyperref}\n\n" .
+		"\\usepackage[hypertex]{hyperref}\n" .
+		"\\usepackage[dvisvgm]{graphicx}\n" .
+		"\\usepackage[margin=1in]{geometry}\n" .
+		"\\usepackage{float}\n\n" .
 		"\\title{}\n" .
 		"\\author{}\n" .
 		"\\date{}\n\n" .
 		"\\begin{document}\n" .
 		"\\pagenumbering{gobble}\n" .
 		"\\vbox{\n" .
-		"	\\maketitle\n\n" .
+		"\\maketitle\n\n" .
 		"}\n" .
-		"\\end{document}\n"
+		"\\end{document}\n\n"
 	);
 	close(FH);
 
