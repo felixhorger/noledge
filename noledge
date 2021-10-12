@@ -286,14 +286,25 @@ sub build_entry {
 		my $i = index($htmlcontent, $keyword);
 		substr($htmlcontent, $i + length($keyword), 0) = 'class="content" ';
 	}
-	
+
+	# Get title of the entry
+	my $title;
+	{
+		my $tex;
+		open(FH, '<', 'content.tex') or die "$msg Could not open content.tex $_";
+		read(FH, $tex, -s FH);
+		close(FH);
+		$tex =~ /\\title\{(.*?)\}/;
+		$title = $1;
+	}
+
 	# Write html to file (here it is known that graph or content changed
 	open(FH, ">", "entry.html") or die "$msg Could not write html file";
 	print(FH
 		"<!DOCTYPE html>\n" .
 		"<html lang=\"en-US\">\n" .
 		"<head>\n" .
-		"<title>TODO</title>\n" .
+		"<title>$title</title>\n" .
 		"<meta charset=\"utf-8\" />\n" .
 		"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />\n" .
 		"<link rel=\"stylesheet\" type=\"text/css\" href=\"entry.css\" />\n" .
@@ -369,7 +380,7 @@ sub initialize_entry {
 	open(FH, ">", "$dir/content.tex");
 	print(FH
 		"\\documentclass{article}\n" .
-		"\\usepackage[hypertex]{hyperref}\n" .
+		"\\usepackage[hypertex, colorlinks=true, urlcolor=blue]{hyperref}\n" .
 		"\\usepackage[dvisvgm]{graphicx}\n" .
 		"\\usepackage[margin=1in]{geometry}\n" .
 		"\\usepackage{float}\n\n" .
