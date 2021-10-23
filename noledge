@@ -272,7 +272,7 @@ sub build_entry {
 		if (system(
 			#--no-shell-escape 
 			('latex --output-format=dvi --output-dir=build content.tex && ' x $runs) . # TODO: Sure that is required?
-			'dvisvgm --page=2 --linkmark=none -n build/content.dvi --output=build/%f.svg'
+			'dvisvgm --bbox=min --exact --page=2 --linkmark=none -n build/content.dvi --output=build/%f.svg'
 		)) { die "$msg Could not compile \"content.tex\""; }
 	}
 	# Read compiled content for later integration into html
