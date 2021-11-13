@@ -65,8 +65,8 @@ $build_parser->add_arg(
 my $move_parser = $subparsers->add_parser(
 	"move",
 	help => "entry with automatic path adjustment.",
-	description => "Move a single entry to another location.\n" .
-	"Paths in all relevant files (tex, gv, html, map) are automatically adjusted\n" .
+	description => "Move a single entry to another location." .
+	"Paths in all relevant files (tex, gv, html, map) are automatically adjusted " .
 	"in all entries found in a given root directory."
 );
 $move_parser->add_arg(
@@ -79,7 +79,7 @@ $move_parser->add_arg(
 );
 $move_parser->add_arg(
 	"root",
-	help => "Paths identified in *.tex, *.gv, .*map, and *.html files found in\n" .
+	help => "Paths identified in *.tex, *.gv, .*map, and *.html files found in " .
 	"this directory will be adjusted accordingly."
 );
 
@@ -345,6 +345,7 @@ sub separators {
 		my ($name) = @_;
 		$name =~ /\.([^.]+)$/;
 		$ext = $1;
+		unless (defined($ext)) { return; }
 	}
 
 	my $start;
