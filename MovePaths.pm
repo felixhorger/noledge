@@ -102,11 +102,11 @@ sub static_file {
 		# Construct correct path
 		my $length_to_replace = length($1);
 		my $path = realpath($1);
-		unless ($path =~ s/$source/$target/g) {
-			continue;
+		unless (defined($path) and $path =~ s/$source/$target/g) {
+			next;
 		}
 		# Append to corrected code
-		$newcode .= $untouched_start . abs2rel($path, $File::Fine::dir) . $untouched_end;
+		$newcode .= $untouched_start . abs2rel($path, $File::Find::dir) . $untouched_end;
 		$i = $match_index + $start_offset + $length_to_replace + $end_offset;
 	}
 	# Copy until end of string
