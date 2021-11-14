@@ -2,8 +2,10 @@
 
 
 
-=head1 No ledge
-Structured knowledge database in a wiki-like HTML format.
+=head1 Noledge
+
+Knowledge database in a wiki-like HTML format.
+
 =cut
 
 
@@ -143,7 +145,6 @@ elsif ($cmdlineargs->current_command() eq "init") {
 
 # Subroutines
 sub is_entry {
-
 	my $entry = shift;
 
 	# Is valid directory?
@@ -154,18 +155,19 @@ sub is_entry {
 
 	return 1;
 }
+
 sub forked_build_was_successful {
 	my ($pid, $exit_code, $entry) = @_;
 	$exit_code and die "Build of $entry was not successful, exit code $exit_code";
 }
-sub run_build_entry {
 
+sub run_build_entry {
 	my $entry = $File::Find::name;
 	return unless is_entry($entry);
 	build_entry($entry);
 }
-sub run_build_entry_parallel {
 
+sub run_build_entry_parallel {
 	my $entry = $File::Find::name;
 	return unless is_entry($entry);
 
@@ -197,6 +199,7 @@ sub build_entry {
 
 	# Create build dir
 	if (! -d "build") { mkdir("build"); }
+
 	# Create css file if non-existant
 	# Note that the user can define a custom one, it won't be overwritten
 	if (! -e "entry.css") {
@@ -262,6 +265,17 @@ sub build_entry {
 			"<IMG SRC=\"build/graph.svg\" USEMAP=\"\#G\" class=\"graph\">\n$graphmap";
 	}
 
+	# Get title of the entry from tex code
+	my $title;
+	{
+		my $tex;
+		open(FH, '<', 'content.tex') or die "$msg Could not open content.tex $_";
+		read(FH, $tex, -s FH);
+		close(FH);
+		$tex =~ /\\title\{(.*?)\}/;
+		$title = $1;
+	}
+
 	# Compile tex
 	my $htmlcode;
 	if ($content_changed) {
@@ -275,6 +289,7 @@ sub build_entry {
 			'dvisvgm --bbox=min --exact --page=2 --linkmark=none -n build/content.dvi --output=build/%f.svg'
 		)) { die "$msg Could not compile \"content.tex\""; }
 	}
+
 	# Read compiled content for later integration into html
 	my $htmlcontent;
 	{
@@ -287,15 +302,16 @@ sub build_entry {
 		substr($htmlcontent, $i + length($keyword), 0) = 'class="content" ';
 	}
 
-	# Get title of the entry
-	my $title;
+	# Repair latex hyperref links by adding dividers
 	{
-		my $tex;
-		open(FH, '<', 'content.tex') or die "$msg Could not open content.tex $_";
-		read(FH, $tex, -s FH);
-		close(FH);
-		$tex =~ /\\title\{(.*?)\}/;
-		$title = $1;
+		# Get all views (where hyperref links lead to)
+		my @svg_views;
+		my $svg_view_pattern = "<view id='loc([0-9]+)' viewBox='[0-9.\\s]+? ([0-9.]+?) [0-9.\\s]+'\\/>";
+		while ($htmlcontent =~ /$svg_view_pattern/g) { 
+			push @svg_views, "<div style='position: absolute; top: $2px; left: 0px'><a id='loc$1'></a></div>";
+			substr($htmlcontent, $-[0], $+[0] - $-[0]+1) = ''; # Assumes newline
+		}
+		$htmlcontent = join("\n", $htmlcontent, @svg_views);
 	}
 
 	# Write html to file (here it is known that graph or content changed
