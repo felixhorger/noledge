@@ -1,3 +1,11 @@
+
+=head1 MovePaths
+
+Adjust relative paths in files which are to be moved to another location.
+
+=cut
+
+
 package MovePaths;
 
 use strict;
@@ -10,11 +18,33 @@ our @ISA= qw( Exporter );
 our @EXPORT_OK = qw( subroutine_for_find );
 our @EXPORT = qw( static_file moved_file );
 
+
+
+=over
+
+=item subroutine_for_find(filename, source, target, separators)
+
+Use this with File::find.
+
+=over 8
+
+=item filename: paths to be replaced point to this file in source.
+
+=item source: moved from here (absolute).
+
+=item target: to here (absolute).
+
+=item separators: subroutine returning the separators enclosing paths.
+It will be given the filename in which paths are to be adjusted.
+
+=back
+
+=cut
+
 sub subroutine_for_find {
 	# Get arguments
-	# source and target realpaths
-	my ($sourcename, $source, $target, $separators) = @_;
-	# sourcename relative to source directory
+	my ($filename, $source, $target, $separators) = @_;
+	# filename relative to source directory
 
 	return sub {
 		# Get paths
@@ -38,10 +68,10 @@ sub subroutine_for_find {
 			open(FH, ">", $name) or die "Could no write to $name";
 			my $newcode;
 			if (index($File::Find::dir, $source) == -1) {
-				$newcode = static_file($sourcename, $source, $target, $code, $start, $end);
+				$newcode = static_file($filename, $source, $target, $code, $start, $end);
 			}
 			else {
-				$newcode = moved_file($sourcename, $target, $code, $start, $end);
+				$newcode = moved_file($filename, $target, $code, $start, $end);
 			}
 			print(FH $newcode);
 			close(FH);
@@ -49,15 +79,32 @@ sub subroutine_for_find {
 	}
 }
 
+
+
+=item moved_file(filename, target, code, start, end)
+
+Adjust paths in the file that is being moved.
+Working directory must be where the file is (where argument code is from).
+
+=over 8
+
+=item filename, target: see subroutine_for_find().
+
+=item code: Contents of the file, where paths should be replaced.
+
+=item start, end: path delimiters.
+
+=back
+
+=cut
+
 sub moved_file {
-	# Requires that wd is directory where $code lies
-	# sourcename relative to source directory
 
 	# Get arguments
-	my ($sourcename, $target, $code, $start, $end) = @_;
+	my ($filename, $target, $code, $start, $end) = @_;
 
 	# Define pattern
-	my $pattern = "${start}([^$start]*?$sourcename\\s*)$end";
+	my $pattern = "${start}([^$start]*?$filename\\s*)$end";
 
 	# Replace all paths
 	my $newcode = "";
@@ -66,7 +113,7 @@ sub moved_file {
 	my $end_offset = $start_offset + length($end);
 	while ($code =~ /$pattern/g) {
 		# Construct correct path
-		my $adjusted = abs2rel(realpath($1), $target); 
+		my $adjusted = abs2rel(realpath($1), $target);
 		# Get parts of string that must be copied
 		my $untouched_start = substr($code, $i, $-[0] - $i + $start_offset);
 		my $untouched_end = substr($code, $-[0] + $start_offset + length($1), $end_offset);
@@ -80,14 +127,31 @@ sub moved_file {
 	return $newcode;
 }
 
-sub static_file {
-	# Requires that wd is directory where $code lies
 
+
+=item static_file(filename, target, code, start, end)
+
+Analogous to moved_file(), but for files that are not moved and
+point to the file being moved.
+
+=over 8
+
+=item filename, target: see subroutine_for_find().
+
+=item code: Contents of the file, where paths should be replaced.
+
+=item start, end: path delimiters.
+
+=back
+
+=cut
+
+sub static_file {
 	# Get arguments
-	my ($sourcename, $source, $target, $code, $start, $end) = @_;
+	my ($filename, $source, $target, $code, $start, $end) = @_;
 
 	# Define pattern
-	my $pattern = "${start}([^$start]*?$sourcename\\s*)$end";
+	my $pattern = "${start}([^$start]*?$filename\\s*)$end";
 
 	# Replace all paths
 	my $newcode = "";
@@ -114,6 +178,10 @@ sub static_file {
 
 	return $newcode;
 }
+
+
+=back
+=cut
 
 1;
 

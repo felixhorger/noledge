@@ -1,10 +1,8 @@
 #!/usr/bin/perl
 
-
-
 =head1 Noledge
 
-Knowledge database in a wiki-like HTML format.
+Generate wiki-like HTML pages with LaTex and GraphViz.
 
 =cut
 
@@ -17,15 +15,12 @@ use Getopt::ArgParse;
 use File::Find;
 use File::Copy;
 use File::Path 'make_path';
-use File::Temp 'tempdir';
 use File::Basename;
-use File::Spec::Functions 'catfile', 'rel2abs', 'abs2rel';
+use File::Spec::Functions 'catfile', 'rel2abs';
 use Cwd 'realpath', 'getcwd';
 use lib dirname(realpath($0));
 use Parallel::ForkManager;
 use MovePaths;
-
-
 
 # Globals
 my $processpool;
@@ -69,7 +64,9 @@ my $move_parser = $subparsers->add_parser(
 	help => "entry with automatic path adjustment.",
 	description => "Move a single entry to another location." .
 	"Paths in all relevant files (tex, gv, html, map) are automatically adjusted " .
-	"in all entries found in a given root directory."
+	"in all entries found in a given root directory. " .
+	"Note that only links on entry.html files are adjusted. " .
+	"Thus, it is advisable to put for example images to an absolute path."
 );
 $move_parser->add_arg(
 	"source",
@@ -105,45 +102,84 @@ $init_parser->add_arg(
 
 
 # Parse cmd line arguments
+# Help
 my $cmdlineargs = $parser->parse_args();
 unless (defined($cmdlineargs->current_command())) {
 	$parser->print_usage();
 	die;
 }
+
+# All the others
 if ($cmdlineargs->current_command() eq "build") {
+	# Build
 	# Is directory?
 	-d $cmdlineargs->root or die "Argument must be a directory";
+
+	# Get the right subroutine (parallel or not?)
+	my $sub_build_entry;
+	if ($cmdlineargs->jobs) {
+		$sub_build_entry = sub {
+			my $entry = $File::Find::name;
+			return unless is_entry($entry);
+
+			# Build entry in forked process
+			$processpool->start($entry) and return;
+			build_entry($entry);
+			$processpool->finish();
+		};
+	}
+	else {
+		$sub_build_entry = sub {
+			my $entry = $File::Find::name;
+			return unless is_entry($entry);
+			build_entry($entry);
+		};
+	}
+
 	# Walk directory and build entries
 	if ($cmdlineargs->jobs > 1) {
 		$processpool = Parallel::ForkManager->new($cmdlineargs->jobs);
 		$processpool->run_on_finish(\&forked_build_was_successful);
-		find(\&run_build_entry_parallel, ( rel2abs($cmdlineargs->root) ));
+		find($sub_build_entry, ( rel2abs($cmdlineargs->root) ));
 		$processpool->wait_all_children();
 	}
 	elsif ($cmdlineargs->jobs == 1) {
-		find(\&run_build_entry, ( rel2abs($cmdlineargs->root) ));
+		find($sub_build_entry, ( rel2abs($cmdlineargs->root) ));
 	}
 	else {
 		die "Number of jobs must be positive"
 	}
 }
 elsif ($cmdlineargs->current_command() eq "move") {
+	# Move
 	unless (-d $cmdlineargs->source and ! -e $cmdlineargs->target and -d $cmdlineargs->root) {
 		die "Source must be directory and target must be non-existent";
 	}
 	move_entry(rel2abs($cmdlineargs->source), rel2abs($cmdlineargs->target), rel2abs($cmdlineargs->root));
 }
 elsif ($cmdlineargs->current_command() eq "find") {
+	# Find
 	die "Not implemented";
 }
 elsif ($cmdlineargs->current_command() eq "init") {
-	initialize_entry($cmdlineargs->directory);
+	# Initialise
+	initialise_entry($cmdlineargs->directory);
 }
-
 
 
 
 # Subroutines
+=head1 Subroutines
+
+=over
+
+=item is_entry(directory)
+
+Checks for existance of content.tex and graph.gv and
+returns one if present.
+
+=cut
+
 sub is_entry {
 	my $entry = shift;
 
@@ -156,33 +192,43 @@ sub is_entry {
 	return 1;
 }
 
+
+=item forked_build_was_successful(pid, exit_code, entry)
+
+Check if build done in parallel was successful and
+print helpful error message if not.
+
+=cut
+
 sub forked_build_was_successful {
 	my ($pid, $exit_code, $entry) = @_;
 	$exit_code and die "Build of $entry was not successful, exit code $exit_code";
 }
 
-sub run_build_entry {
-	my $entry = $File::Find::name;
-	return unless is_entry($entry);
-	build_entry($entry);
-}
-
-sub run_build_entry_parallel {
-	my $entry = $File::Find::name;
-	return unless is_entry($entry);
-
-	# Build entry in forked process
-	$processpool->start($entry) and return;
-	build_entry($entry);
-	$processpool->finish();
-}
 
 
+=item build_entry(directory)
 
-=item build_entry
-Routine to generate an HTML (+CSS) entry from a tex and gv file.
-Argument: directory containing the above files.
+Build noledge entry:
+
+=over 8
+
+=item 1)
+If non-existant, write default entry.css.
+
+=item 2)
+If necessary, build content.svg and graph.gv (via timestamps).
+
+=item 3)
+Repair some stuff (HTML title, LaTex hyperref links).
+
+=item 4)
+Generate entry.html.
+
+=back
+
 =cut
+
 sub build_entry {
 
 	my $directory = shift;
@@ -284,7 +330,7 @@ sub build_entry {
 		if ($cmdlineargs->quick) { $runs = 1; }
 		# Run latex
 		if (system(
-			#--no-shell-escape 
+			#--no-shell-escape
 			('latex --output-format=dvi --output-dir=build content.tex && ' x $runs) . # TODO: Sure that is required?
 			'dvisvgm --bbox=min --exact --page=2 --linkmark=none -n build/content.dvi --output=build/%f.svg'
 		)) { die "$msg Could not compile \"content.tex\""; }
@@ -307,7 +353,7 @@ sub build_entry {
 		# Get all views (where hyperref links lead to)
 		my @svg_views;
 		my $svg_view_pattern = "<view id='loc([0-9]+)' viewBox='[0-9.\\s]+? ([0-9.]+?) [0-9.\\s]+'\\/>";
-		while ($htmlcontent =~ /$svg_view_pattern/g) { 
+		while ($htmlcontent =~ /$svg_view_pattern/g) {
 			push @svg_views, "<div style='position: absolute; top: $2px; left: 0px'><a id='loc$1'></a></div>";
 			substr($htmlcontent, $-[0], $+[0] - $-[0]+1) = ''; # Assumes newline
 		}
@@ -339,7 +385,10 @@ sub build_entry {
 
 
 
-=item move_entry
+=item move_entry(source, target, root)
+
+Use the MovePaths package to move a noledge entry.
+
 =cut
 sub move_entry {
 	# Get arguments
@@ -353,17 +402,23 @@ sub move_entry {
 	move($source, $target) or die "Could not move entry $source";
 }
 
-=item separators
+=item separators(name)
+
+Used in move_entry() for identifying relevant files (with paths that need updating) and
+selecting delimiters of paths (e.g. {} in LaTex).
+
 =cut
 sub separators {
+	# Get extension
 	my $ext;
 	{
-		my ($name) = @_;
+		my $name = shift;
 		$name =~ /\.([^.]+)$/;
 		$ext = $1;
 		unless (defined($ext)) { return; }
 	}
 
+	# Select start and end delimiters
 	my $start;
 	my $end;
 	if ($ext eq "tex") {
@@ -384,8 +439,12 @@ sub separators {
 }
 
 
+=item initialise_entry(directory)
 
-sub initialize_entry {
+Generates directory with default tex and gv files, convenience.
+
+=cut
+sub initialise_entry {
 
 	my $dir = shift;
 
@@ -417,4 +476,7 @@ sub initialize_entry {
 	print(FH "digraph G {\n\n}\n");
 	close(FH);
 }
+
+=back
+=cut
 
