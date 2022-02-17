@@ -454,7 +454,6 @@ sub initialise_entry {
 		"\\usepackage[hypertex, colorlinks=true, urlcolor=blue]{hyperref}\n" .
 		"\\usepackage[dvisvgm]{graphicx}\n" .
 		"\\usepackage[margin=1in]{geometry}\n" .
-		"\\usepackage{float}\n\n" .
 		"\\title{}\n" .
 		"\\author{}\n" .
 		"\\date{}\n\n" .
