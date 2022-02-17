@@ -113,12 +113,12 @@ unless (defined($cmdlineargs->current_command())) {
 if ($cmdlineargs->current_command() eq "build") {
 	# Build
 	# Is directory?
-	-d $cmdlineargs->root or die "Argument must be a directory";
+	(defined $cmdlineargs->root and -d $cmdlineargs->root) or die "Argument must be a directory";
 
-	# Get the right subroutine (parallel or not?)
-	my $sub_build_entry;
-	if ($cmdlineargs->jobs) {
-		$sub_build_entry = sub {
+	# Walk directory and build entries
+	if ($cmdlineargs->jobs > 1) {
+		$processpool = Parallel::ForkManager->new($cmdlineargs->jobs);
+		my $subroutine = sub {
 			my $entry = $File::Find::name;
 			return unless is_entry($entry);
 
@@ -127,28 +127,22 @@ if ($cmdlineargs->current_command() eq "build") {
 			build_entry($entry);
 			$processpool->finish();
 		};
+		$processpool->run_on_finish(\&forked_build_was_successful);
+		find($subroutine, ( rel2abs($cmdlineargs->root) ));
+		$processpool->wait_all_children();
 	}
-	else {
-		$sub_build_entry = sub {
+	elsif ($cmdlineargs->jobs == 1) {
+		my $subroutine = sub {
 			my $entry = $File::Find::name;
 			return unless is_entry($entry);
 			build_entry($entry);
 		};
-	}
-
-	# Walk directory and build entries
-	if ($cmdlineargs->jobs > 1) {
-		$processpool = Parallel::ForkManager->new($cmdlineargs->jobs);
-		$processpool->run_on_finish(\&forked_build_was_successful);
-		find($sub_build_entry, ( rel2abs($cmdlineargs->root) ));
-		$processpool->wait_all_children();
-	}
-	elsif ($cmdlineargs->jobs == 1) {
-		find($sub_build_entry, ( rel2abs($cmdlineargs->root) ));
+		find($subroutine, ( rel2abs($cmdlineargs->root) ));
 	}
 	else {
 		die "Number of jobs must be positive"
 	}
+
 }
 elsif ($cmdlineargs->current_command() eq "move") {
 	# Move
