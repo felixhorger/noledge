@@ -315,6 +315,7 @@ sub build_entry {
 		close(FH);
 		$tex =~ /\\title\{(.*?)\}/;
 		$title = $1;
+		$title = "" unless defined($title);
 	}
 
 	# Compile tex
