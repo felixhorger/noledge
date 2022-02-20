@@ -467,7 +467,7 @@ sub initialise_entry {
 	close(FH);
 
 	open(FH, ">", "$dir/graph.gv");
-	print(FH "digraph G {\n\n}\n");
+	print(FH "digraph G {\n\n}\n\n");
 	close(FH);
 }
 
