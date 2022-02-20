@@ -456,6 +456,8 @@ sub initialise_entry {
 		"\\usepackage[hypertex, colorlinks=false]{hyperref}\n" .
 		"\\usepackage[dvisvgm]{graphicx}\n" .
 		"\\usepackage[margin=1in]{geometry}\n" .
+		"\\usepackage[titles]{tocloft}\n" .
+		"\\renewcommand{\\cftdot}{}\n\n" .
 		"\\title{}\n" .
 		"\\author{}\n" .
 		"\\date{}\n\n" .
