@@ -243,7 +243,7 @@ sub build_entry {
 	# Create css file if non-existant
 	# Note that the user can define a custom one, it won't be overwritten
 	if (! -e "entry.css") {
-		open(FH, ">", "entry.css") or die "$msg Could not open entry.css for writing";
+		open(FH, ">", "entry.css") or die "$msg Could not open entry.css for writing: $_";
 		print(FH
 			".graph {\n" .
 			"	display: block;\n" .
@@ -311,7 +311,7 @@ sub build_entry {
 	my $title;
 	{
 		my $tex;
-		open(FH, '<', 'content.tex') or die "$msg Could not open content.tex $_";
+		open(FH, '<', 'content.tex') or die "$msg Could not open content.tex: $_";
 		read(FH, $tex, -s FH);
 		close(FH);
 		$tex =~ /\\title\{(.*?)\}/;
@@ -336,7 +336,7 @@ sub build_entry {
 	# Read compiled content for later integration into html
 	my $htmlcontent;
 	{
-		open(FH, "<", 'build/content.svg') or die "$msg Could not open content.svg $_";
+		open(FH, "<", 'build/content.svg') or die "$msg Could not open content.svg: $_";
 		read(FH, $htmlcontent, -s FH);
 		close(FH);
 		# Insert class to center content
@@ -347,11 +347,20 @@ sub build_entry {
 
 	# Repair latex hyperref links by adding dividers
 	{
+		# Get height of graph
+		my $graph;
+		open(FH, "<", 'build/graph.svg') or die "$msg Could not open graph.svg: $_";
+		read(FH, $graph, -s FH);
+		close(FH);
+		$graph =~ '<svg width="[0-9]+pt" height="([0-9]+)pt"';
+		unless (defined($1)) { die "Could not find graph height in graph.svg"; }
+		my $graph_height = $1;
 		# Get all views (where hyperref links lead to)
 		my @svg_views;
-		my $svg_view_pattern = "<view id='loc([0-9]+)' viewBox='[0-9.\\s]+? ([0-9.]+?) [0-9.\\s]+'\\/>";
+		my $svg_view_pattern = "<view id='loc([0-9]+)' viewBox='[0-9.\\s]+? ([0-9.]+?) [0-9.\\s]+? ([0-9.]+?)'\\/>";
 		while ($htmlcontent =~ /$svg_view_pattern/g) {
-			push @svg_views, "<div style='position: absolute; top: $2px; left: 0px'><a id='loc$1'></a></div>";
+			my $top = $2 + $graph_height;
+			push @svg_views, "<div style='position: absolute; top: ${top}pt'><a id='loc$1'></a></div>";
 			substr($htmlcontent, $-[0], $+[0] - $-[0]+1) = ''; # Assumes newline
 		}
 		$htmlcontent = join("\n", $htmlcontent, @svg_views);
