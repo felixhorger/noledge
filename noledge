@@ -258,7 +258,7 @@ sub build_entry {
 			"	margin-left: auto;\n" .
 			"	margin-top: 0cm;\n" .
 			"	margin-bottom: 2cm;\n" .
-			"	shape-rendering: geoemtricPrecision;\n" .
+			"	shape-rendering: geometricPrecision;\n" .
 			"	image-rendering: pixelated;\n" .
 			"}\n"
 		);
