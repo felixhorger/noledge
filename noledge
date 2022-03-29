@@ -57,6 +57,13 @@ $build_parser->add_arg(
 	default => 0,
 	help => "If set, latex will be run once only, e.g. references might be wrong."
 );
+$build_parser->add_arg(
+	"--force",
+	"-f",
+	type => "Bool",
+	default => 0,
+	help => "Whether to build despite output files being newer than sources."
+);
 
 # Move
 my $move_parser = $subparsers->add_parser(
@@ -266,17 +273,15 @@ sub build_entry {
 	}
 
 	# Check what was changed; for later use
-	my $graph_changed;
-	{
+	my $graph_changed = 1;
+	my $content_changed = 1;
+	unless ($cmdlineargs->force) {
 		my $age = -M "graph.gv";
 		$graph_changed = !(
 			(-f "build/graph.svg" and $age >= -M "build/graph.svg") and
 			(-f "build/graph.map" and $age >= -M "build/graph.map")
 		);
-	}
-	my $content_changed;
-	{
-		my $age = -M "content.tex";
+		$age = -M "content.tex";
 		$content_changed = !(-f "build/content.svg" and $age >= -M "build/content.svg");
 	}
 
