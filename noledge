@@ -464,25 +464,7 @@ sub initialise_entry {
 
 	mkdir($dir);
 
-	open(FH, ">", "$dir/content.tex");
-	print(FH
-		"\\documentclass{article}\n" .
-		"\\usepackage[hypertex, colorlinks=false]{hyperref}\n" .
-		"\\usepackage[dvisvgm]{graphicx}\n" .
-		"\\usepackage[margin=1in]{geometry}\n" .
-		"\\usepackage[titles]{tocloft}\n" .
-		"\\renewcommand{\\cftdot}{}\n\n" .
-		"\\title{}\n" .
-		"\\author{}\n" .
-		"\\date{}\n\n" .
-		"\\begin{document}\n" .
-		"\\pagenumbering{gobble}\n" .
-		"\\vbox{\n" .
-		"\\maketitle\n\n" .
-		"}\n" .
-		"\\end{document}\n\n"
-	);
-	close(FH);
+	copy(catfile($ENV{"HOME"}, ".noledge.tex"), "$dir/content.tex") or die "Could not find '~/.noledge.tex'";
 
 	open(FH, ">", "$dir/graph.gv");
 	print(FH "digraph G {\n\n}\n\n");
