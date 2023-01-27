@@ -6,7 +6,7 @@ Generate wiki-like HTML pages with LaTex and GraphViz.
 
 =cut
 
-
+# TODO: have a proper server with this as backend for generation, this then allows interactive stuff
 
 # Imports
 use warnings;
@@ -14,6 +14,7 @@ use strict;
 use Getopt::ArgParse;
 use File::Find;
 use File::Copy;
+use File::HomeDir;
 use File::Path 'make_path';
 use File::Basename;
 use File::Spec::Functions 'catfile', 'rel2abs';
@@ -224,6 +225,9 @@ If necessary, build content.svg and graph.gv (via timestamps).
 Repair some stuff (HTML title, LaTex hyperref links).
 
 =item 4)
+Add interactively set notes from user specified download folder
+
+=item 5)
 Generate entry.html.
 
 =back
@@ -246,31 +250,6 @@ sub build_entry {
 
 	# Create build dir
 	if (! -d "build") { mkdir("build"); }
-
-	# Create css file if non-existant
-	# Note that the user can define a custom one, it won't be overwritten
-	if (! -e "entry.css") {
-		open(FH, ">", "entry.css") or die "$msg Could not open entry.css for writing: $_";
-		print(FH
-			".graph {\n" .
-			"	display: block;\n" .
-			"	margin-right: auto;\n" .
-			"	margin-left: auto;\n" .
-			"	margin-top: 2cm;\n" .
-			"	margin-bottom: 2.5cm;\n" .
-			"}\n" .
-			".content {\n" .
-			"	display: block;\n" .
-			"	margin-right: auto;\n" .
-			"	margin-left: auto;\n" .
-			"	margin-top: 0cm;\n" .
-			"	margin-bottom: 2cm;\n" .
-			"	shape-rendering: geometricPrecision;\n" .
-			"	image-rendering: pixelated;\n" .
-			"}\n"
-		);
-		close(FH);
-	}
 
 	# Check what was changed; for later use
 	my $graph_changed = 1;
@@ -371,6 +350,55 @@ sub build_entry {
 		$htmlcontent = join("\n", $htmlcontent, @svg_views);
 	}
 
+	# Get relative path to home directory needed below
+	my $homedir_relative = File::Spec->abs2rel(File::HomeDir->my_home, '.');
+
+	# Read in user notes
+	my $notes = '';
+	{
+		# Read existing notes
+		if (-f "notes.html") {
+			open(FH, "<", "notes.html") or die "$msg Could not open notes.html: $_";
+			my $notes = read(FH, $notes, -s FH);
+			close(FH);
+		}
+		# Get directory where notes are stored
+		open(FH, "<", catfile($homedir_relative, '.noledge/notes')) or die "$msg Could not open ~/.noledge/notes: $_";
+		chomp(my $target_path = <FH>);
+		chomp(my $remove_path = <FH>); # This is the wrong path prepended by the browser
+		close(FH);
+		# Get list of files
+		opendir(DH, $target_path) or die "$msg Could not find directory $target_path: $_";
+		my @note_files = readdir(DH);
+		closedir(DH);
+		# Iterate files
+		foreach my $filename (@note_files) {
+			# Check if is file
+			next if -d $filename;
+			# Get corresponding entry.html path
+			$filename = catfile($target_path, $filename);
+			open(FH, "<", $filename) or die "$msg Could not open $filename: $_";
+			chomp(my $note_entry_path = <FH>);
+			$note_entry_path =~ s/$remove_path//g;
+			# Read notes' html code
+			while (my $line = <FH>) {
+				$notes = $notes . $line;
+			}
+			close(FH);
+		}
+		# Save notes in a new file
+		open(FH, ">", "notes.html") or die "$msg Could not open notes.html: $_";
+		print(FH $notes);
+		close(FH);
+		# Now that notes are safe, remove the brower's files
+		foreach my $filename (@note_files) {
+			# Check if is file
+			next if -d $filename;
+			# Delete
+			unlink($filename);
+		}
+	}
+
 	# Write html to file (here it is known that graph or content changed
 	open(FH, ">", "entry.html") or die "$msg Could not write html file";
 	print(FH
@@ -380,12 +408,15 @@ sub build_entry {
 		"<title>$title</title>\n" .
 		"<meta charset=\"utf-8\" />\n" .
 		"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />\n" .
-		"<link rel=\"stylesheet\" type=\"text/css\" href=\"entry.css\" />\n" .
+		"<link rel=\"stylesheet\" type=\"text/css\" href=\"${\catfile($homedir_relative, '.noledge/stylesheet.css')}\" />\n" .
+		"<script src=\"${\catfile($homedir_relative, '.noledge/script.js')}\"></script>\n".
 		"</head>\n" .
 		"<body>\n" .
 		$htmlgraph .
 		"\n".
 		$htmlcontent .
+		"\n".
+		$notes .
 		"\n</body>\n".
 		"</html>\n"
 	);
@@ -394,7 +425,7 @@ sub build_entry {
 	chdir($wd) or die "Could not cd to $wd";
 }
 
-
+# TODO: if noledge build is run, also check the downloads. Put script def in config file!
 
 =item move_entry(source, target, root)
 
@@ -464,7 +495,7 @@ sub initialise_entry {
 
 	mkdir($dir);
 
-	copy(catfile($ENV{"HOME"}, ".noledge.tex"), "$dir/content.tex") or die "Could not find '~/.noledge.tex'";
+	copy(catfile(${\File::HomeDir->my_home}, ".noledge/template.tex"), "$dir/content.tex") or die "Could not find '~/.noledge/template.tex'";
 
 	open(FH, ">", "$dir/graph.gv");
 	print(FH "digraph G {\n\n}\n\n");
